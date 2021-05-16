@@ -1,0 +1,28 @@
+[package]
+name = "kubelet-deviceplugin-proto"
+version = "0.1.0"
+authors = ["Aleksander Heintz <alxandr@alxandr.me>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+bitflags = "1"
+futures = "0.3"
+hyper = "0.14"
+lazy_static = "1"
+pin-project = "1"
+prost = "0.7"
+prost-types = "0.7"
+slug = "0.1"
+thiserror = "1"
+tokio = "1"
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = "0.4"
+tower = "0.4"
+tracing = "0.1"
+
+[features]
+default = ["v1beta1"]
+v1beta1 = []

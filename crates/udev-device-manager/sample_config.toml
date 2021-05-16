@@ -1,0 +1,18 @@
+[[devices]]
+subsystem = "tty"
+
+[devices.labels]
+type = "conbee2"
+
+[devices.selector.matchAttributes]
+idVendor = "1cf1"
+idProduct = "0030"
+serial = "DE2422340"
+
+[[deviceClasses]]
+name = "zigbee"
+target = "/dev/ttyACM#"
+subsystem = "tty"
+
+[deviceClasses.selector.matchLabels]
+type = "conbee2"
