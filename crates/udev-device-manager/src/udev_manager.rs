@@ -8,11 +8,12 @@ use crate::{
 use anyhow::{Error, Result};
 use async_trait::async_trait;
 use bastion::{children::Children, context::BastionContext, message::AnswerSender};
-use device::Device;
 use futures::{future::ready, stream::select, TryStreamExt};
 use std::{collections::BTreeMap, convert::TryFrom};
 use tokio_udev::{Enumerator, EventType, MonitorBuilder};
 use tracing::{event, span, Level, Span};
+
+pub use device::Device;
 
 #[derive(Debug, Clone)]
 pub enum UdevEvent {

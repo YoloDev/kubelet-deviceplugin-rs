@@ -1,12 +1,20 @@
 mod filter_map_bastion_message;
 
+use anyhow::Result;
 use anyhow::{format_err, Error};
-use bastion::{context::BastionContext, message::MessageHandler, prelude::SignedMessage};
+use bastion::{
+  context::BastionContext,
+  distributor::Distributor,
+  message::MessageHandler,
+  prelude::{SendError, SignedMessage},
+};
 use futures::{future::BoxFuture, Stream};
+use pin_project::pin_project;
 use std::{
   future::Future,
   pin::Pin,
   task::{Context, Poll},
+  time::Duration,
 };
 
 pub use filter_map_bastion_message::FilterMapBasionMessage;
@@ -63,6 +71,57 @@ impl<'a> Stream for BastionContextStream<'a> {
         Poll::Ready(Some(
           msg.map_err(|()| format_err!("Failed to get bastion message")),
         ))
+      }
+    }
+  }
+}
+
+pub(crate) trait DistributorExt<'a> {
+  fn wait_for_responsive(self) -> WaitForResponsive<'a>;
+}
+
+impl<'a> DistributorExt<'a> for &'a Distributor {
+  fn wait_for_responsive(self) -> WaitForResponsive<'a> {
+    WaitForResponsive {
+      distributor: self,
+      delay: None,
+    }
+  }
+}
+
+#[pin_project]
+#[derive(Debug)]
+pub(crate) struct WaitForResponsive<'a> {
+  distributor: &'a Distributor,
+
+  #[pin]
+  delay: Option<tokio::time::Sleep>,
+}
+
+impl<'a> Future for WaitForResponsive<'a> {
+  type Output = Result<()>;
+
+  fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    let this = self.project();
+    let mut delay: Pin<&mut Option<tokio::time::Sleep>> = this.delay;
+    let distributor: &'a Distributor = this.distributor;
+
+    loop {
+      match delay.as_mut().as_pin_mut() {
+        None => match distributor.tell_one(()) {
+          Ok(()) => break Poll::Ready(Ok(())),
+          Err(SendError::EmptyRecipient) => {
+            let sleep = tokio::time::sleep(Duration::from_millis(50));
+            delay.set(Some(sleep));
+          }
+          Err(e) => break Poll::Ready(Err(e.into())),
+        },
+        Some(sleep) => match sleep.poll(cx) {
+          Poll::Pending => break Poll::Pending,
+          Poll::Ready(_) => {
+            delay.set(None);
+          }
+        },
       }
     }
   }

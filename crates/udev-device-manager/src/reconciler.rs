@@ -5,6 +5,7 @@ use crate::{
   config_manager::ConfigEvent,
   signal_manager::Reload,
   system::{self, System},
+  utils::DistributorExt,
   Actor, ChildrenTypeExt,
 };
 use anyhow::format_err;
@@ -77,8 +78,11 @@ impl Reconciler {
         .entry(device.name)
         .or_insert_with(|| self.create_device_actor(device.clone()));
 
-      let mut lock = group.config.lock().await;
-      *lock = device.clone();
+      {
+        let mut lock = group.config.lock().await;
+        *lock = device.clone();
+      }
+      group.distributor.wait_for_responsive().await?;
       group
         .distributor
         .tell_everyone(DeviceActorCommand::UpdateConfig(device.clone()))?;

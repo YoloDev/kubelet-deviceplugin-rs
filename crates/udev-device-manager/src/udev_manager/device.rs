@@ -15,6 +15,7 @@ impl<'a> StrExt for &'a str {
 
 #[derive(Debug)]
 struct Inner {
+  subsystem: InternedString,
   syspath: InternedString,
   devnode: InternedString,
   attributes: BTreeMap<InternedString, Option<InternedString>>,
@@ -24,12 +25,20 @@ struct Inner {
 pub struct Device(Arc<Inner>);
 
 impl Device {
+  pub fn subsystem(&self) -> InternedString {
+    self.0.subsystem
+  }
+
   pub fn syspath(&self) -> InternedString {
     self.0.syspath
   }
 
   pub fn devnode(&self) -> InternedString {
     self.0.devnode
+  }
+
+  pub fn attribute(&self, name: &str) -> Option<InternedString> {
+    self.0.attributes.get(name).copied().flatten()
   }
 }
 
@@ -47,6 +56,12 @@ pub enum PathKind {
 
 #[derive(Debug, Error)]
 pub enum DeviceError {
+  #[error("Device has no subsystem")]
+  NoSubsystem,
+
+  #[error("Device has invalid subsystem: {subsystem:?}")]
+  InvalidSubsystem { subsystem: OsString },
+
   #[error("Device path {path_kind:?} was not a valid string: {}", .value.display())]
   PathNotValidString { path_kind: PathKind, value: PathBuf },
 
@@ -81,12 +96,24 @@ impl DeviceError {
       value: value.into(),
     }
   }
+
+  fn invalid_subsystem(subsystem: impl Into<OsString>) -> Self {
+    Self::InvalidSubsystem {
+      subsystem: subsystem.into(),
+    }
+  }
 }
 
 impl<'a> TryFrom<tokio_udev::Device> for Device {
   type Error = DeviceError;
 
   fn try_from(value: tokio_udev::Device) -> Result<Self, Self::Error> {
+    let subsystem = value
+      .subsystem()
+      .ok_or(DeviceError::NoSubsystem)?
+      .to_str()
+      .ok_or_else(|| DeviceError::invalid_subsystem(value.subsystem().unwrap()))?
+      .intern();
     let syspath = value
       .syspath()
       .to_str()
@@ -123,6 +150,7 @@ impl<'a> TryFrom<tokio_udev::Device> for Device {
       .collect::<Result<BTreeMap<_, _>, DeviceError>>()?;
 
     let inner = Inner {
+      subsystem,
       syspath,
       devnode,
       attributes,

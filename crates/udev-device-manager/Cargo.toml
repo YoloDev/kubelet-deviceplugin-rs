@@ -8,7 +8,7 @@ edition = "2018"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-bastion = { git = "https://github.com/bastion-rs/bastion.git", rev = "f1697b388befbf8446f0d8e4217fccad2f79fd10", features = ["tokio-runtime"] }
+bastion = { git = "https://github.com/bastion-rs/bastion.git", rev = "44508cd4e7e323e90bf3548d979c6e0974cb1cc2", features = ["tokio-runtime"] }
 clap = "3.0.0-beta.2"
 futures = "0.3"
 lasso = "0.5"

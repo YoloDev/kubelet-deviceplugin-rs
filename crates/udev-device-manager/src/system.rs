@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use crate::{config::Config, config_manager};
+use crate::{
+  config::Config,
+  config_manager,
+  udev_manager::{self, Device as UdevDevice},
+};
 use anyhow::Result;
 
 pub enum System {}
@@ -49,6 +53,13 @@ impl System {
   pub async fn reload_config() -> Result<Arc<Config>> {
     config::commands()
       .request(config_manager::ConfigCommand::ForceReload)
+      .await?
+      .map_err(Into::into)
+  }
+
+  pub async fn get_udev_devices() -> Result<Vec<UdevDevice>> {
+    udev::commands()
+      .request(udev_manager::UdevCommand::GetDevices)
       .await?
       .map_err(Into::into)
   }

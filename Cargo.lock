@@ -115,7 +115,7 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 [[package]]
 name = "bastion"
 version = "0.4.5-alpha.0"
-source = "git+https://github.com/bastion-rs/bastion.git?rev=f1697b388befbf8446f0d8e4217fccad2f79fd10#f1697b388befbf8446f0d8e4217fccad2f79fd10"
+source = "git+https://github.com/bastion-rs/bastion.git?rev=44508cd4e7e323e90bf3548d979c6e0974cb1cc2#44508cd4e7e323e90bf3548d979c6e0974cb1cc2"
 dependencies = [
  "anyhow",
  "async-mutex",

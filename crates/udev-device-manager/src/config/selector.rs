@@ -23,6 +23,19 @@ pub enum SelectorValueRequirement {
   DoesNotExist,
 }
 
+impl SelectorValueRequirement {
+  pub fn matches(&self, value: Option<InternedString>) -> bool {
+    match (value, self) {
+      (None, Self::DoesNotExist | Self::NotIn(_)) => true,
+      (None, Self::Exists | Self::In(_)) => false,
+      (Some(_), Self::Exists) => true,
+      (Some(_), Self::DoesNotExist) => false,
+      (Some(v), Self::In(vs)) => vs.contains(&v),
+      (Some(v), Self::NotIn(vs)) => !vs.contains(&v),
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SelectorRequirement {
   /// The attribute key that the selector applies to.
@@ -31,6 +44,12 @@ pub struct SelectorRequirement {
   /// Represents a key's relationship to a set of values.
   #[serde(flatten)]
   pub value_requirement: SelectorValueRequirement,
+}
+
+impl SelectorRequirement {
+  pub fn matches(&self, get_value: &impl Fn(&str) -> Option<InternedString>) -> bool {
+    self.value_requirement.matches(get_value(&*self.key))
+  }
 }
 
 pub trait SelectorType {
@@ -42,6 +61,25 @@ pub struct Selector<T: SelectorType> {
   flat: Option<BTreeMap<InternedString, InternedString>>,
   expressions: Option<Vec<SelectorRequirement>>,
   marker: PhantomData<T>,
+}
+
+impl<T: SelectorType> Selector<T> {
+  pub fn matches(&self, get_value: &impl Fn(&str) -> Option<InternedString>) -> bool {
+    for (name, value) in self.flat.iter().flatten() {
+      let actual_value = get_value(&*name);
+      if actual_value != Some(*value) {
+        return false;
+      }
+    }
+
+    for expr in self.expressions.iter().flatten() {
+      if !expr.matches(get_value) {
+        return false;
+      }
+    }
+
+    true
+  }
 }
 
 mod ser_de {
