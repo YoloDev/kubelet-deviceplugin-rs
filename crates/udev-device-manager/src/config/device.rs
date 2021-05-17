@@ -14,6 +14,9 @@ pub use selector::UdevSelector;
 /// physical device may end up in multiple "Device"-groups.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Device {
+  /// Device group name - must be unique
+  pub name: InternedString,
+
   /// Device subsystem
   pub subsystem: InternedString,
 

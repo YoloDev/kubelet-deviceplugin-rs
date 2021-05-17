@@ -2,19 +2,14 @@ mod watcher;
 
 use crate::{
   config::Config,
-  utils::{merge_streams, BastionContextExt, Choice2},
+  system,
+  utils::{BastionContextExt, BastionStreamExt},
   Actor, ConfigFormat,
 };
-use anyhow::{format_err, Error, Result};
+use anyhow::{Error, Result};
 use async_trait::async_trait;
-use bastion::{
-  children::Children,
-  context::BastionContext,
-  dispatcher::BroadcastTarget,
-  distributor::Distributor,
-  message::{AnswerSender, MessageHandler},
-};
-use futures::{future::ready, StreamExt, TryStreamExt};
+use bastion::{children::Children, context::BastionContext, message::AnswerSender};
+use futures::{future::ready, stream::select, StreamExt, TryStreamExt};
 use notify::{DebouncedEvent, RecursiveMode};
 use std::{path::PathBuf, result::Result as StdResult, sync::Arc, time::Duration};
 use thiserror::Error;
@@ -38,19 +33,25 @@ pub enum ConfigError {
 }
 
 #[derive(Debug, Clone)]
+pub enum ConfigEvent {
+  ConfigUpdated(Arc<Config>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ConfigCommand {
+  GetConfig,
+  ForceReload,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct ConfigManager {
   file: PathBuf,
   format: ConfigFormat,
-  distributor: Distributor,
 }
 
 impl ConfigManager {
-  pub fn new(file: PathBuf, format: ConfigFormat, distributor: Distributor) -> Self {
-    Self {
-      file,
-      format,
-      distributor,
-    }
+  pub fn new(file: PathBuf, format: ConfigFormat) -> Self {
+    Self { file, format }
   }
 
   async fn read_config(&self) -> StdResult<Config, ConfigError> {
@@ -83,14 +84,18 @@ impl ConfigManager {
 }
 
 #[derive(Debug)]
-pub struct ConfigUpdated(Arc<Config>);
-#[derive(Debug)]
-pub struct GetConfig;
-
-#[derive(Debug)]
 enum Message {
   GetConfig(AnswerSender),
-  UpdateConfig,
+  UpdateConfig(Option<AnswerSender>),
+}
+
+impl Message {
+  fn from_command(command: ConfigCommand, sender: AnswerSender) -> Option<Message> {
+    match command {
+      ConfigCommand::GetConfig => Some(Message::GetConfig(sender)),
+      ConfigCommand::ForceReload => Some(Message::UpdateConfig(Some(sender))),
+    }
+  }
 }
 
 #[async_trait]
@@ -102,7 +107,7 @@ impl Actor for ConfigManager {
   }
 
   fn configure(&self, children: Children) -> Children {
-    children.with_distributor(self.distributor)
+    children.with_distributor(system::config::commands())
   }
 
   async fn run(self, ctx: BastionContext) -> Result<()> {
@@ -112,34 +117,31 @@ impl Actor for ConfigManager {
     let mut watcher = Watcher::new(Duration::from_secs(2))?;
     watcher.watch(&self.file, RecursiveMode::NonRecursive)?;
 
-    let file_events = watcher.filter_map(|e| match e {
-      DebouncedEvent::Write(_) => ready(Some(Ok(()))),
-      DebouncedEvent::Error(e, _) => ready(Some(Err(e))),
-      _ => ready(None),
-    });
-
-    let messages = ctx.stream();
-    let mut merged = merge_streams((file_events, messages)).filter_map(|choice| {
-      ready(match choice {
-        // Success paths
-        Choice2::Choice1(Ok(())) => Some(Ok(Message::UpdateConfig)),
-        Choice2::Choice2(Ok(msg)) => MessageHandler::new(msg)
-          .on_question(|_: GetConfig, sender| Some(Ok(Message::GetConfig(sender))))
-          .on_fallback(|_, _| None),
-
-        // Error paths
-        Choice2::Choice1(Err(e)) => Some(Err(Error::from(e))),
-        Choice2::Choice2(Err(())) => Some(Err(format_err!("Failed to receive message"))),
+    let file_events = watcher
+      .filter_map(|e| match e {
+        DebouncedEvent::Write(_) => ready(Some(Ok(Message::UpdateConfig(None)))),
+        DebouncedEvent::Error(e, _) => ready(Some(Err(e))),
+        _ => ready(None),
       })
-    });
+      .map_err(Error::from);
 
-    while let Some(msg) = merged.try_next().await? {
-      match msg {
-        Message::UpdateConfig => {
+    let bastion_messages = ctx
+      .stream()
+      .filter_map_bastion_message(|msg| msg.on_question(Message::from_command));
+
+    let mut messages = select(file_events, bastion_messages);
+
+    while let Some(message) = messages.try_next().await? {
+      match message {
+        Message::UpdateConfig(sender) => {
+          event!(target: "udev-device-manager", Level::DEBUG, "Updating config");
           let new_config = self.read_config().await?;
 
           config = Arc::new(new_config);
-          ctx.broadcast_message(BroadcastTarget::All, ConfigUpdated(config.clone()));
+          system::config::events().tell_everyone(ConfigEvent::ConfigUpdated(config.clone()))?;
+          if let Some(sender) = sender {
+            let _ = sender.reply(config.clone());
+          }
         }
 
         Message::GetConfig(sender) => {
