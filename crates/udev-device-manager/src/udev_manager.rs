@@ -89,6 +89,7 @@ impl Actor for UdevManager {
         device.subsystem = %device.subsystem(),
         device.syspath = %device.syspath(),
         device.devnode = %device.devnode(),
+        device.attributes = ?device.attributes(),
         "disovered device");
       self.notify_upserted(device);
     }

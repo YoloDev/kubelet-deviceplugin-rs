@@ -40,6 +40,10 @@ impl Device {
   pub fn attribute(&self, name: &str) -> Option<InternedString> {
     self.0.attributes.get(name).copied()
   }
+
+  pub fn attributes(&self) -> &BTreeMap<InternedString, InternedString> {
+    &self.0.attributes
+  }
 }
 
 impl fmt::Debug for Device {
