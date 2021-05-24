@@ -16,6 +16,7 @@ RUN cargo build --package ${package} --release --locked --bin ${package} --targe
   && cp /src/obj/release/${package} /src/${package}
 
 FROM debian:buster-slim
+ARG package=k8s-udev-device-manager
 ARG APP=/usr/src/${package}
 
 RUN apt-get update \
@@ -37,4 +38,4 @@ USER $APP_USER
 WORKDIR ${APP}
 
 ENV package ${package}
-CMD ["./${package}"]
+CMD ./${package}
