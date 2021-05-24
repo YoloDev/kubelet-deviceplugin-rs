@@ -83,6 +83,12 @@ impl Actor for UdevManager {
     event!(target: "udev-device-manager", Level::DEBUG, devices.len = devices.len(), "gathered {} udev devices", devices.len());
 
     for device in devices.values().cloned() {
+      event!(
+        target: "udev-device-manager",
+        Level::DEBUG,
+        device.syspath = %device.syspath(),
+        device.devnode = %device.devnode(),
+        "disovered device");
       self.notify_upserted(device);
     }
 
