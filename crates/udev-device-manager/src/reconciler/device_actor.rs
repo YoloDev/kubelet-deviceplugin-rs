@@ -153,7 +153,7 @@ fn match_device(device: &UdevDevice, config: &Device) -> bool {
         device.syspath = %device.syspath(),
         device.devnode = %device.devnode(),
         device_type.name = &*config.name,
-        "device does not match execpted attributes {:#?}",
+        "device does not match execpted attributes {:?}",
         errors);
 
       false

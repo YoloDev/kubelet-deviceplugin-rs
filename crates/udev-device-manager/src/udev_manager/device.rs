@@ -153,7 +153,7 @@ impl<'a> TryFrom<tokio_udev::Device> for Device {
       .devnode()
       .ok_or(DeviceError::NoDevNode)?
       .to_str()
-      .ok_or_else(|| DeviceError::invalid_path(PathKind::SysPath, value.syspath()))?
+      .ok_or_else(|| DeviceError::invalid_path(PathKind::DevNode, value.syspath()))?
       .intern();
 
     let mut attributes = BTreeMap::new();
@@ -165,13 +165,14 @@ impl<'a> TryFrom<tokio_udev::Device> for Device {
           .ok_or_else(|| DeviceError::invalid_attribute_name(attribute.name()))?
           .intern();
 
-        let value = attribute
-          .value()
-          .to_str()
-          .ok_or_else(|| DeviceError::invalid_attribute_value(name, attribute.name()))?
-          .intern();
+        if let Some(value) = device.attribute_value(attribute.name()) {
+          let value = value
+            .to_str()
+            .ok_or_else(|| DeviceError::invalid_attribute_value(name, attribute.name()))?
+            .intern();
 
-        attributes.entry(name).or_insert(value);
+          attributes.entry(name).or_insert(value);
+        }
       }
     }
 
