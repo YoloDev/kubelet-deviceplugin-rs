@@ -987,17 +987,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mio-udev"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df6ed2849d7c5fdb8060994186a0dfc5c85425f288ab7b564ac8d51a0a4be983"
-dependencies = [
- "libc",
- "mio 0.7.11",
- "udev",
-]
-
-[[package]]
 name = "miow"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1695,14 +1684,14 @@ dependencies = [
 
 [[package]]
 name = "tokio-udev"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d81ea1c3081def60ed62f5641c4d6abe230dfebc481f8fccf49a1549169f9c2"
+checksum = "44b6256bb5be66b53b9ab51d05074d9cf3d50a05d099fa5eb6b42020cd907010"
 dependencies = [
  "futures-core",
  "mio 0.7.11",
- "mio-udev",
  "tokio",
+ "udev",
 ]
 
 [[package]]
@@ -1895,12 +1884,14 @@ checksum = "59547bce71d9c38b83d9c0e92b6066c4253371f15005def0c30d9657f50c7642"
 
 [[package]]
 name = "udev"
-version = "0.5.0"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "048df778e99eea028c08cca7853b9b521df6948b59bb29ab8bb737c057f58e6d"
+checksum = "3193363f52bb34c6708ac2ffedcb5f7e5874f0329ef68e1315f27d8d768eb568"
 dependencies = [
  "libc",
  "libudev-sys",
+ "mio 0.7.11",
+ "pkg-config",
 ]
 
 [[package]]
