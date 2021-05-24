@@ -1,5 +1,7 @@
 FROM rustlang/rust:nightly as builder
 
+ARG package=k8s-udev-device-manager
+
 COPY Cargo.lock /src/Cargo.lock
 WORKDIR /src
 # Update index
@@ -8,13 +10,13 @@ RUN --mount=type=cache,target=/src/obj --mount=type=cache,target=$CARGO_HOME \
 
 COPY . /src
 RUN --mount=type=cache,target=/src/obj --mount=type=cache,target=$CARGO_HOME \
-  cargo build --package three-commas-scraper --release --locked --bin three-commas-scraper --target-dir /src/obj \
+  cargo build --package ${package} --release --locked --bin ${package} --target-dir /src/obj \
   # && ls -R /src/obj \
-  && cp /src/obj/release/three-commas-scraper /src/three-commas-scraper
+  && cp /src/obj/release/${package} /src/${package}
 # RUN --mount=type=cache,target=/src/target ls -la target && ls -la target/release && exit 1
 
 FROM debian:buster-slim
-ARG APP=/usr/src/three-commas-scraper
+ARG APP=/usr/src/${package}
 
 RUN apt-get update \
   && apt-get install -y ca-certificates tzdata \
@@ -28,10 +30,10 @@ RUN groupadd $APP_USER \
   && useradd -g $APP_USER $APP_USER \
   && mkdir -p ${APP}
 
-COPY --from=builder /src/three-commas-scraper ${APP}/three-commas-scraper
+COPY --from=builder /src/${package} ${APP}/${package}
 RUN chown -R $APP_USER:$APP_USER ${APP}
 
 USER $APP_USER
 WORKDIR ${APP}
 
-CMD ["./three-commas-scraper"]
+CMD ["./${package}"]
