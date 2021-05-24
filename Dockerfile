@@ -2,24 +2,24 @@ FROM rustlang/rust:nightly as builder
 
 ARG package=k8s-udev-device-manager
 
+RUN apt-get update \
+  && apt-get install -y libudev-dev \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY Cargo.lock /src/Cargo.lock
 WORKDIR /src
 # Update index
-RUN --mount=type=cache,target=/src/obj --mount=type=cache,target=$CARGO_HOME \
-  cargo install lazy_static >/dev/null 2>/dev/null || true
+RUN cargo install lazy_static >/dev/null 2>/dev/null || true
 
 COPY . /src
-RUN --mount=type=cache,target=/src/obj --mount=type=cache,target=$CARGO_HOME \
-  cargo build --package ${package} --release --locked --bin ${package} --target-dir /src/obj \
-  # && ls -R /src/obj \
+RUN cargo build --package ${package} --release --locked --bin ${package} --target-dir /src/obj \
   && cp /src/obj/release/${package} /src/${package}
-# RUN --mount=type=cache,target=/src/target ls -la target && ls -la target/release && exit 1
 
 FROM debian:buster-slim
 ARG APP=/usr/src/${package}
 
 RUN apt-get update \
-  && apt-get install -y ca-certificates tzdata \
+  && apt-get install -y ca-certificates tzdata libudev1 \
   && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8080
