@@ -13,6 +13,32 @@ impl<'a> StrExt for &'a str {
   }
 }
 
+trait UdevDeviceExt {
+  fn hierarchy(&self) -> UdevHierarchy;
+}
+
+impl UdevDeviceExt for tokio_udev::Device {
+  fn hierarchy(&self) -> UdevHierarchy {
+    UdevHierarchy(Some(self.clone()))
+  }
+}
+
+struct UdevHierarchy(Option<tokio_udev::Device>);
+
+impl Iterator for UdevHierarchy {
+  type Item = tokio_udev::Device;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    match self.0.take() {
+      None => None,
+      Some(d) => {
+        self.0 = d.parent();
+        Some(d)
+      }
+    }
+  }
+}
+
 #[derive(Debug)]
 struct Inner {
   subsystem: InternedString,
@@ -130,9 +156,9 @@ impl<'a> TryFrom<tokio_udev::Device> for Device {
       .ok_or_else(|| DeviceError::invalid_path(PathKind::SysPath, value.syspath()))?
       .intern();
 
-    let attributes = value
-      .attributes()
-      .map(|attribute| {
+    let mut attributes = BTreeMap::new();
+    for device in value.hierarchy() {
+      for attribute in device.attributes() {
         let name = attribute
           .name()
           .to_str()
@@ -145,9 +171,9 @@ impl<'a> TryFrom<tokio_udev::Device> for Device {
           .ok_or_else(|| DeviceError::invalid_attribute_value(name, attribute.name()))?
           .intern();
 
-        Ok((name, value))
-      })
-      .collect::<Result<BTreeMap<_, _>, DeviceError>>()?;
+        attributes.entry(name).or_insert(value);
+      }
+    }
 
     let inner = Inner {
       subsystem,
