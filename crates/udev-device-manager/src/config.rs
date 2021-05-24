@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 pub use device::{Device, DeviceAccess, UdevSelector};
 pub use device_class::{DeviceClass, DeviceSelector};
+pub use selector::MatchResult;
 pub use string::InternedString;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

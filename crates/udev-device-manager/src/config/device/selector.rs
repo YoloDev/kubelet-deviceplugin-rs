@@ -1,5 +1,5 @@
 use crate::config::{
-  selector::{Selector, SelectorType},
+  selector::{MatchResult, Selector, SelectorType},
   InternedString,
 };
 use serde::{Deserialize, Serialize};
@@ -11,8 +11,8 @@ pub struct UdevSelector {
 }
 
 impl UdevSelector {
-  pub fn matches(&self, get_value: &impl Fn(&str) -> Option<InternedString>) -> bool {
-    self.selector.matches(get_value)
+  pub fn match_with(&self, get_value: &impl Fn(&str) -> Option<InternedString>) -> MatchResult {
+    self.selector.match_with(get_value)
   }
 }
 

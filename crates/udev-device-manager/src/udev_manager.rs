@@ -86,6 +86,7 @@ impl Actor for UdevManager {
       event!(
         target: "udev-device-manager",
         Level::DEBUG,
+        device.subsystem = %device.subsystem(),
         device.syspath = %device.syspath(),
         device.devnode = %device.devnode(),
         "disovered device");

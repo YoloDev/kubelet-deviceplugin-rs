@@ -1,5 +1,5 @@
 use crate::{
-  config::Device,
+  config::{Device, MatchResult},
   system::{self, System},
   udev_manager::{Device as UdevDevice, UdevEvent},
   utils::{BastionContextExt, BastionStreamExt},
@@ -131,12 +131,32 @@ impl Actor for DeviceActor {
 
 fn match_device(device: &UdevDevice, config: &Device) -> bool {
   if device.subsystem() != config.subsystem {
+    event!(
+      target: "udev-device-manager",
+      Level::TRACE,
+      device.subsystem = %device.subsystem(),
+      device.syspath = %device.syspath(),
+      device.devnode = %device.devnode(),
+      device_type.name = &*config.name,
+      "device does not match expected subsystem {}",
+      config.subsystem);
     return false;
   }
 
-  if !config.selector.matches(&|name| device.attribute(name)) {
-    return false;
-  }
+  match config.selector.match_with(&|name| device.attribute(name)) {
+    MatchResult::Matches => true,
+    MatchResult::Mismatch(errors) => {
+      event!(
+        target: "udev-device-manager",
+        Level::TRACE,
+        device.subsystem = %device.subsystem(),
+        device.syspath = %device.syspath(),
+        device.devnode = %device.devnode(),
+        device_type.name = &*config.name,
+        "device does not match execpted attributes {:#?}",
+        errors);
 
-  true
+      false
+    }
+  }
 }

@@ -4,8 +4,8 @@ use serde::{
   ser::SerializeStruct,
   Deserialize, Deserializer, Serialize, Serializer,
 };
-use smallvec::SmallVec;
-use std::{collections::BTreeMap, fmt, marker::PhantomData};
+use smallvec::{smallvec, SmallVec};
+use std::{collections::BTreeMap, fmt, marker::PhantomData, ops};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "operator", content = "values")]
@@ -24,14 +24,27 @@ pub enum SelectorValueRequirement {
 }
 
 impl SelectorValueRequirement {
-  pub fn matches(&self, value: Option<InternedString>) -> bool {
+  pub fn match_with(&self, value: Option<InternedString>, field: InternedString) -> MatchResult {
     match (value, self) {
-      (None, Self::DoesNotExist | Self::NotIn(_)) => true,
-      (None, Self::Exists | Self::In(_)) => false,
-      (Some(_), Self::Exists) => true,
-      (Some(_), Self::DoesNotExist) => false,
-      (Some(v), Self::In(vs)) => vs.contains(&v),
-      (Some(v), Self::NotIn(vs)) => !vs.contains(&v),
+      (None, Self::DoesNotExist | Self::NotIn(_)) => MatchResult::Matches,
+      (None, Self::In(vs)) => MatchResult::expected_one_of(field, vs, value),
+      (None, Self::Exists) => MatchResult::expected_any(field, value),
+      (Some(_), Self::Exists) => MatchResult::Matches,
+      (Some(_), Self::DoesNotExist) => MatchResult::expected_none(field, value),
+      (Some(v), Self::In(vs)) => {
+        if vs.contains(&v) {
+          MatchResult::Matches
+        } else {
+          MatchResult::expected_one_of(field, vs, value)
+        }
+      }
+      (Some(v), Self::NotIn(vs)) => {
+        if !vs.contains(&v) {
+          MatchResult::Matches
+        } else {
+          MatchResult::expected_none_of(field, vs, value)
+        }
+      }
     }
   }
 }
@@ -46,9 +59,99 @@ pub struct SelectorRequirement {
   pub value_requirement: SelectorValueRequirement,
 }
 
+#[derive(Clone, Debug, Copy)]
+pub struct Mismatch<'a> {
+  field: InternedString,
+  expected_value: ExpectedValue<'a>,
+  actual_value: Option<InternedString>,
+}
+
+#[derive(Clone, Debug, Copy)]
+pub enum ExpectedValue<'a> {
+  Any,
+  None,
+  OneOf(&'a SmallVec<[InternedString; 2]>),
+  NoneOf(&'a SmallVec<[InternedString; 2]>),
+  Value(InternedString),
+}
+
+#[derive(Clone, Debug)]
+pub enum MatchResult<'a> {
+  Matches,
+  Mismatch(SmallVec<[Mismatch<'a>; 2]>),
+}
+
+impl<'a> ops::AddAssign for MatchResult<'a> {
+  fn add_assign(&mut self, rhs: Self) {
+    match self {
+      Self::Matches => *self = rhs,
+      Self::Mismatch(lhs) => match rhs {
+        Self::Matches => (),
+        Self::Mismatch(rhs) => lhs.extend(rhs.into_iter()),
+      },
+    }
+  }
+}
+
+impl<'a> MatchResult<'a> {
+  fn expected_one_of(
+    field: InternedString,
+    values: &'a SmallVec<[InternedString; 2]>,
+    actual: Option<InternedString>,
+  ) -> Self {
+    Self::Mismatch(smallvec![Mismatch {
+      field,
+      expected_value: ExpectedValue::OneOf(values),
+      actual_value: actual,
+    }])
+  }
+
+  fn expected_none_of(
+    field: InternedString,
+    values: &'a SmallVec<[InternedString; 2]>,
+    actual: Option<InternedString>,
+  ) -> Self {
+    Self::Mismatch(smallvec![Mismatch {
+      field,
+      expected_value: ExpectedValue::NoneOf(values),
+      actual_value: actual,
+    }])
+  }
+
+  fn expected_any(field: InternedString, actual: Option<InternedString>) -> Self {
+    Self::Mismatch(smallvec![Mismatch {
+      field,
+      expected_value: ExpectedValue::Any,
+      actual_value: actual,
+    }])
+  }
+
+  fn expected_none(field: InternedString, actual: Option<InternedString>) -> Self {
+    Self::Mismatch(smallvec![Mismatch {
+      field,
+      expected_value: ExpectedValue::None,
+      actual_value: actual,
+    }])
+  }
+
+  fn expected_value(
+    field: InternedString,
+    value: InternedString,
+    actual: Option<InternedString>,
+  ) -> Self {
+    Self::Mismatch(smallvec![Mismatch {
+      field,
+      expected_value: ExpectedValue::Value(value),
+      actual_value: actual,
+    }])
+  }
+}
+
 impl SelectorRequirement {
-  pub fn matches(&self, get_value: &impl Fn(&str) -> Option<InternedString>) -> bool {
-    self.value_requirement.matches(get_value(&*self.key))
+  pub fn match_with(&self, get_value: &impl Fn(&str) -> Option<InternedString>) -> MatchResult {
+    self
+      .value_requirement
+      .match_with(get_value(&*self.key), self.key)
   }
 }
 
@@ -64,21 +167,21 @@ pub struct Selector<T: SelectorType> {
 }
 
 impl<T: SelectorType> Selector<T> {
-  pub fn matches(&self, get_value: &impl Fn(&str) -> Option<InternedString>) -> bool {
+  pub fn match_with(&self, get_value: &impl Fn(&str) -> Option<InternedString>) -> MatchResult {
+    let mut result = MatchResult::Matches;
+
     for (name, value) in self.flat.iter().flatten() {
       let actual_value = get_value(&*name);
       if actual_value != Some(*value) {
-        return false;
+        result += MatchResult::expected_value(*name, *value, actual_value);
       }
     }
 
     for expr in self.expressions.iter().flatten() {
-      if !expr.matches(get_value) {
-        return false;
-      }
+      result += expr.match_with(get_value);
     }
 
-    true
+    result
   }
 }
 
