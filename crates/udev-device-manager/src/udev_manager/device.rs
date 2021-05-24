@@ -18,7 +18,7 @@ struct Inner {
   subsystem: InternedString,
   syspath: InternedString,
   devnode: InternedString,
-  attributes: BTreeMap<InternedString, Option<InternedString>>,
+  attributes: BTreeMap<InternedString, InternedString>,
 }
 
 #[derive(Clone)]
@@ -38,7 +38,7 @@ impl Device {
   }
 
   pub fn attribute(&self, name: &str) -> Option<InternedString> {
-    self.0.attributes.get(name).copied().flatten()
+    self.0.attributes.get(name).copied()
   }
 }
 
@@ -137,13 +137,9 @@ impl<'a> TryFrom<tokio_udev::Device> for Device {
 
         let value = attribute
           .value()
-          .map(|value| {
-            value
-              .to_str()
-              .ok_or_else(|| DeviceError::invalid_attribute_value(name, attribute.name()))
-          })
-          .transpose()?
-          .map(|value| value.intern());
+          .to_str()
+          .ok_or_else(|| DeviceError::invalid_attribute_value(name, attribute.name()))?
+          .intern();
 
         Ok((name, value))
       })

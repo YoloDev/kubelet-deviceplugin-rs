@@ -1,19 +1,22 @@
 mod device;
+mod event_stream;
 
 use crate::{
   system,
+  udev_manager::event_stream::EventStreamBuilder,
   utils::{BastionContextExt, BastionStreamExt},
   Actor,
 };
 use anyhow::{Error, Result};
 use async_trait::async_trait;
 use bastion::{children::Children, context::BastionContext, message::AnswerSender};
-use futures::{future::ready, stream::select, TryStreamExt};
+use futures::{future::ready, stream::select, StreamExt, TryStreamExt};
 use std::{collections::BTreeMap, convert::TryFrom};
-use tokio_udev::{Enumerator, EventType, MonitorBuilder};
+use tokio_udev::Enumerator;
 use tracing::{event, span, Level, Span};
 
 pub use device::Device;
+pub use event_stream::DeviceEvent;
 
 #[derive(Debug, Clone)]
 pub enum UdevEvent {
@@ -30,7 +33,7 @@ pub enum UdevCommand {
 pub(crate) struct UdevManager;
 
 enum Message {
-  Udev(EventType, Device),
+  Udev(DeviceEvent),
   GetDevices(AnswerSender),
 }
 
@@ -83,16 +86,10 @@ impl Actor for UdevManager {
       self.notify_upserted(device);
     }
 
-    let udev_stream = MonitorBuilder::new()?
-      .listen()?
-      .try_filter_map(|e| {
-        ready(Ok(
-          Device::try_from(e.device())
-            .ok()
-            .map(|d| Message::Udev(e.event_type(), d)),
-        ))
-      })
-      .map_err(Error::from);
+    let udev_stream = EventStreamBuilder::new()?
+      .listen()
+      .await?
+      .map(|e| e.map(Message::Udev));
     let bastion_stream = ctx
       .stream()
       .filter_map_bastion_message(|msg| msg.on_question(Message::from_command));
@@ -101,23 +98,27 @@ impl Actor for UdevManager {
 
     while let Some(message) = messages.try_next().await? {
       match message {
-        Message::Udev(event, device) => {
-          event!(target: "udev-device-manager", Level::DEBUG, event.type_name = %event, event.device.syspath = %device.syspath(), "udev event received");
+        Message::Udev(event) => {
+          event!(
+            target: "udev-device-manager",
+            Level::DEBUG,
+            event.type_name = %event.event_type(),
+            event.device.syspath = %event.device().syspath(),
+            event.device.devnode = %event.device().devnode(),
+            "udev event received");
 
           match event {
-            tokio_udev::EventType::Add | tokio_udev::EventType::Change => {
+            DeviceEvent::Add(device) | DeviceEvent::Change(device) => {
               devices.insert(device.syspath(), device.clone());
               self.notify_upserted(device);
             }
 
-            tokio_udev::EventType::Remove => {
+            DeviceEvent::Remove(device) => {
               devices.remove(&device.syspath());
               self.notify_removed(device);
             }
 
-            tokio_udev::EventType::Bind
-            | tokio_udev::EventType::Unbind
-            | tokio_udev::EventType::Unknown => (),
+            DeviceEvent::Bind(_) | DeviceEvent::Unbind(_) | DeviceEvent::Unknown(_) => (),
           }
         }
 

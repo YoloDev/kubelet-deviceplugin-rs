@@ -1,6 +1,6 @@
 use lasso::{Spur, ThreadedRodeo};
 use once_cell::sync::Lazy;
-use std::{borrow::Borrow, cmp::Ordering, fmt, hash, ops::Deref, sync::Arc};
+use std::{borrow::Borrow, cmp::Ordering, ffi::OsStr, fmt, hash, ops::Deref, sync::Arc};
 
 pub(crate) static STRING_INTERNER: Lazy<Arc<ThreadedRodeo>> =
   Lazy::new(|| Arc::new(Default::default()));
@@ -162,6 +162,13 @@ impl From<InternedString> for String {
 impl Borrow<str> for InternedString {
   fn borrow(&self) -> &str {
     self.as_str()
+  }
+}
+
+impl AsRef<OsStr> for InternedString {
+  #[inline]
+  fn as_ref(&self) -> &OsStr {
+    (&*self).as_ref()
   }
 }
 
