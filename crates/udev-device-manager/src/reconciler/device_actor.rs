@@ -143,7 +143,10 @@ fn match_device(device: &UdevDevice, config: &Device) -> bool {
     return false;
   }
 
-  match config.selector.match_with(&|name| device.attribute(name)) {
+  match config
+    .selector
+    .match_with(&|name| device.attribute(name).and_then(|v| v.as_option()))
+  {
     MatchResult::Matches => true,
     MatchResult::Mismatch(errors) => {
       event!(

@@ -39,12 +39,38 @@ impl Iterator for UdevHierarchy {
   }
 }
 
+#[derive(Clone, Copy)]
+pub enum AttributeValue {
+  None,
+  Invalid,
+  Value(InternedString),
+}
+
+impl fmt::Debug for AttributeValue {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      AttributeValue::None => f.write_str("None"),
+      AttributeValue::Invalid => f.write_str("Invalid"),
+      AttributeValue::Value(v) => fmt::Debug::fmt(v, f),
+    }
+  }
+}
+
+impl AttributeValue {
+  pub fn as_option(self) -> Option<InternedString> {
+    match self {
+      Self::Value(v) => Some(v),
+      _ => None,
+    }
+  }
+}
+
 #[derive(Debug)]
 struct Inner {
   subsystem: InternedString,
   syspath: InternedString,
   devnode: InternedString,
-  attributes: BTreeMap<InternedString, InternedString>,
+  attributes: BTreeMap<InternedString, AttributeValue>,
 }
 
 #[derive(Clone)]
@@ -63,11 +89,11 @@ impl Device {
     self.0.devnode
   }
 
-  pub fn attribute(&self, name: &str) -> Option<InternedString> {
+  pub fn attribute(&self, name: &str) -> Option<AttributeValue> {
     self.0.attributes.get(name).copied()
   }
 
-  pub fn attributes(&self) -> &BTreeMap<InternedString, InternedString> {
+  pub fn attributes(&self) -> &BTreeMap<InternedString, AttributeValue> {
     &self.0.attributes
   }
 }
@@ -100,12 +126,6 @@ pub enum DeviceError {
 
   #[error("Invalid attribute name: {name:?}")]
   InvalidAttributeName { name: OsString },
-
-  #[error("Invalid attribute value for attribute '{name}': {value:?}")]
-  InvalidAttributeValue {
-    name: InternedString,
-    value: OsString,
-  },
 }
 
 impl DeviceError {
@@ -118,13 +138,6 @@ impl DeviceError {
 
   fn invalid_attribute_name(name: impl Into<OsString>) -> Self {
     Self::InvalidAttributeName { name: name.into() }
-  }
-
-  fn invalid_attribute_value(name: InternedString, value: impl Into<OsString>) -> Self {
-    Self::InvalidAttributeValue {
-      name,
-      value: value.into(),
-    }
   }
 
   fn invalid_subsystem(subsystem: impl Into<OsString>) -> Self {
@@ -166,10 +179,11 @@ impl<'a> TryFrom<tokio_udev::Device> for Device {
           .intern();
 
         if let Some(value) = device.attribute_value(attribute.name()) {
-          let value = value
-            .to_str()
-            .ok_or_else(|| DeviceError::invalid_attribute_value(name, attribute.name()))?
-            .intern();
+          let value = match value.to_str() {
+            None => AttributeValue::Invalid,
+            Some(v) if v.is_empty() => AttributeValue::None,
+            Some(v) => AttributeValue::Value(v.intern()),
+          };
 
           attributes.entry(name).or_insert(value);
         }
