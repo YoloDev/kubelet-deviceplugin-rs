@@ -1,5 +1,5 @@
 use crate::{
-  config::{Device, MatchResult},
+  config::{Device, Labels, MatchResult},
   system::{self, System},
   udev_manager::{Device as UdevDevice, UdevEvent},
   utils::{BastionContextExt, BastionStreamExt},
@@ -12,7 +12,10 @@ use bastion::{
   prelude::RefAddr,
 };
 use futures::{executor::block_on, lock::Mutex, TryStreamExt};
-use std::sync::Arc;
+use std::{
+  collections::{btree_map::Entry, BTreeMap},
+  sync::Arc,
+};
 use tracing::{event, Level, Span};
 
 #[derive(Debug, Clone)]
@@ -22,16 +25,22 @@ pub enum DeviceActorCommand {
 }
 
 #[derive(Debug, Clone)]
-pub enum DeviceActorEvent {}
+pub enum DeviceActorEvent {
+  InfoUpdated(DeviceTypeInfo),
+  DevicesUpdated,
+}
 
-// #[derive(Debug, Default)]
-// struct State {}
+#[derive(Debug, Clone)]
+pub struct DeviceTypeInfo {
+  labels: Labels,
+  events: Distributor,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct DeviceActor {
   config: Arc<Mutex<Arc<Device>>>,
-  // state: Arc<Mutex<State>>,
-  distributor: Distributor,
+  commands: Distributor,
+  events: Distributor,
 }
 
 enum Message {
@@ -58,16 +67,17 @@ impl Message {
 }
 
 impl DeviceActor {
-  pub fn new(config: Arc<Mutex<Arc<Device>>>, distributor: Distributor) -> Self {
+  pub fn new(config: Arc<Mutex<Arc<Device>>>, commands: Distributor, events: Distributor) -> Self {
     Self {
       config,
-      // state: Default::default(),
-      distributor,
+      commands,
+      events,
     }
   }
 
   fn notify(&self, event: DeviceActorEvent) {
-    let _ = system::device::events().tell_everyone(event);
+    let _ = system::device::events().tell_everyone(event.clone());
+    let _ = self.events.tell_everyone(event);
   }
 }
 
@@ -82,7 +92,7 @@ impl Actor for DeviceActor {
 
   fn configure(&self, children: Children) -> Children {
     children
-      .with_distributor(self.distributor)
+      .with_distributor(self.commands)
       .with_distributor(system::device::commands())
       .with_distributor(system::udev::events())
   }
@@ -93,7 +103,8 @@ impl Actor for DeviceActor {
       .await?
       .into_iter()
       .filter(|dev| match_device(dev, &config))
-      .collect::<Vec<_>>();
+      .map(|dev| (dev.syspath(), dev))
+      .collect::<BTreeMap<_, _>>();
 
     event!(target: "udev-device-manager", Level::DEBUG, device.len = devices.len(), device.name = &*config.name, "device group has {} devices", devices.len());
 
@@ -109,19 +120,50 @@ impl Actor for DeviceActor {
     let mut messages = bastion_messages;
 
     while let Some(message) = messages.try_next().await? {
+      let len = devices.len();
       match message {
         Message::UpdateConfig(c) => {
+          event!(target: "udev-device-manager", Level::DEBUG, device.len = len, device.name = &*config.name, "received UpdateConfig");
           config = c;
           *self.config.lock().await = config.clone();
+          // TODO: Re-scan devices
         }
 
-        Message::GetInfo(_sender) => {
-          todo!()
+        Message::GetInfo(sender) => {
+          event!(target: "udev-device-manager", Level::DEBUG, device.len = len, device.name = &*config.name, "received GetInfo");
+          let _ = sender.reply(DeviceTypeInfo {
+            labels: config.labels.clone(),
+            events: self.events,
+          });
         }
 
-        Message::DeviceUpserted(device) => {}
+        Message::DeviceUpserted(device) => match devices.entry(device.syspath()) {
+          Entry::Vacant(entry) => {
+            if match_device(&device, &config) {
+              event!(target: "udev-device-manager", Level::DEBUG, device.len = len, device.name = &*config.name, "received DeviceUpserted on new matching device");
+              entry.insert(device);
+              self.notify(DeviceActorEvent::DevicesUpdated);
+            }
+          }
+          Entry::Occupied(mut entry) => {
+            event!(target: "udev-device-manager", Level::DEBUG, device.len = len, device.name = &*config.name, "received DeviceUpserted on existing device");
+            if !match_device(&device, &config) {
+              event!(target: "udev-device-manager", Level::DEBUG, device.len = len, device.name = &*config.name, "device no longer matches criteria - removed");
+              entry.remove();
+            } else {
+              entry.insert(device);
+            }
+            self.notify(DeviceActorEvent::DevicesUpdated);
+          }
+        },
 
-        Message::DeviceRemoved(device) => {}
+        Message::DeviceRemoved(device) => match devices.remove(&device.syspath()) {
+          None => (),
+          Some(_) => {
+            event!(target: "udev-device-manager", Level::DEBUG, device.len = len, device.name = &*config.name, "received DeviceRemoved on existing device");
+            self.notify(DeviceActorEvent::DevicesUpdated);
+          }
+        },
       }
     }
 

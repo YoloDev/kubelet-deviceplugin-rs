@@ -55,8 +55,9 @@ impl Reconciler {
     let name = config.name;
     let config = Arc::new(Mutex::new(config));
     let distributor = Distributor::named(&format!("device:{}:command", name));
-    let child_ref =
-      DeviceActor::new(config.clone(), distributor).register(Some(&self.devices_supervisor));
+    let events = Distributor::named(&format!("device:{}:events", name));
+    let child_ref = DeviceActor::new(config.clone(), distributor, events)
+      .register(Some(&self.devices_supervisor));
 
     Group {
       child_ref,

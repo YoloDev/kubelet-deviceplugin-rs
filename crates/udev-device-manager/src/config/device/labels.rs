@@ -1,10 +1,10 @@
 use crate::config::InternedString;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 #[derive(Clone, PartialEq)]
 pub struct Labels {
-  values: BTreeMap<InternedString, InternedString>,
+  values: Arc<BTreeMap<InternedString, InternedString>>,
 }
 
 impl fmt::Debug for Labels {
@@ -18,7 +18,7 @@ impl Serialize for Labels {
   where
     S: serde::Serializer,
   {
-    self.values.serialize(serializer)
+    (*self.values).serialize(serializer)
   }
 }
 
@@ -27,7 +27,10 @@ impl<'de> Deserialize<'de> for Labels {
   where
     D: serde::Deserializer<'de>,
   {
-    <BTreeMap<InternedString, InternedString> as Deserialize<'de>>::deserialize(deserializer)
-      .map(|values| Labels { values })
+    <BTreeMap<InternedString, InternedString> as Deserialize<'de>>::deserialize(deserializer).map(
+      |values| Labels {
+        values: Arc::new(values),
+      },
+    )
   }
 }

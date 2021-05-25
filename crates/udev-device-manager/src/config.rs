@@ -6,7 +6,7 @@ mod string;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub use device::{Device, DeviceAccess, UdevSelector};
+pub use device::{Device, DeviceAccess, Labels, UdevSelector};
 pub use device_class::{DeviceClass, DeviceSelector};
 pub use selector::MatchResult;
 pub use string::InternedString;
