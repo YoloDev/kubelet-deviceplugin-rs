@@ -1,3 +1,7 @@
+#########################################################################
+# BUILDER
+#########################################################################
+
 FROM rustlang/rust:nightly as builder
 
 ARG package=k8s-udev-device-manager
@@ -14,6 +18,10 @@ RUN cargo install lazy_static >/dev/null 2>/dev/null || true
 COPY . /src
 RUN cargo build --package ${package} --release --locked --bin ${package} --target-dir /src/obj \
   && cp /src/obj/release/${package} /src/${package}
+
+#########################################################################
+# FINAL IMAGE
+#########################################################################
 
 FROM debian:buster-slim
 ARG package=k8s-udev-device-manager

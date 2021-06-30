@@ -4,7 +4,13 @@ mod types;
 use async_trait::async_trait;
 use futures::{stream::TryStream, Stream, TryStreamExt};
 use hyper::{Server, Uri};
-use std::{convert::TryFrom, path::Path, pin::Pin, sync::Arc, time::Duration};
+use std::{
+  convert::TryFrom,
+  path::{Path, PathBuf},
+  pin::Pin,
+  sync::Arc,
+  time::Duration,
+};
 use thiserror::Error;
 use tokio::{io, net::UnixStream, task};
 use tonic::transport::Endpoint;
@@ -387,7 +393,8 @@ where
       }
     };
 
-    let socket_listener = UnixSocketListener::bind(&socket_path)?;
+    let socket_listener = UnixSocketListener::bind(&socket_path)
+      .map_err(|e| ConnectionError::UnixSocketBind(socket_path.clone(), e))?;
 
     let device_plugin_service = proto::device_plugin_server::DevicePluginServer::new(self);
     let server = Server::builder(socket_listener)
@@ -440,6 +447,9 @@ pub enum ConnectionError {
 
   #[error("Failed to connect to kubelet socket at '{}': {0}", KUBELET_SOCKET)]
   KubeletSocketConnect(tonic::transport::Error),
+
+  #[error("Failed to bind unix socket at '{}'", .0.display())]
+  UnixSocketBind(PathBuf, #[source] io::Error),
 
   #[error(transparent)]
   Transport(#[from] tonic::transport::Error),
