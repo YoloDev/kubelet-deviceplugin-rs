@@ -4,16 +4,19 @@ mod types;
 use async_trait::async_trait;
 use futures::{stream::TryStream, Stream, TryStreamExt};
 use hyper::{Server, Uri};
-use std::{any::Any, convert::TryFrom, path::Path, pin::Pin, sync::Arc, time::Duration};
+use std::{convert::TryFrom, path::Path, pin::Pin, sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::{io, net::UnixStream};
+use tokio::{io, net::UnixStream, task};
 use tonic::transport::Endpoint;
 use tower::service_fn;
 use tracing::{span, Instrument, Level, Span};
 
 pub use types::*;
 
-use crate::transport::{Svc, UnixSocketListener};
+use crate::{
+  transport::{Svc, UnixSocketListener},
+  KubernetesDevicePluginServer,
+};
 
 /// Means that the device is healthy.
 pub const HEALTHY: &str = "Healthy";
@@ -293,7 +296,7 @@ impl<T: DevicePluginService> proto::device_plugin_server::DevicePlugin for T {
     &self,
     _: tonic::Request<proto::Empty>,
   ) -> Result<tonic::Response<Self::ListAndWatchStream>, tonic::Status> {
-    let inner_stream = <Self as DevicePluginService>::list_and_watch(&self).await?;
+    let inner_stream = <Self as DevicePluginService>::list_and_watch(self).await?;
     let mapped = inner_stream.map_ok(proto::ListAndWatchResponse::from);
     let boxed = Box::pin(mapped);
 
@@ -305,7 +308,7 @@ impl<T: DevicePluginService> proto::device_plugin_server::DevicePlugin for T {
     request: tonic::Request<proto::PreferredAllocationRequest>,
   ) -> Result<tonic::Response<proto::PreferredAllocationResponse>, tonic::Status> {
     let response =
-      <Self as DevicePluginService>::get_preferred_allocation(&self, request.into_inner().into())
+      <Self as DevicePluginService>::get_preferred_allocation(self, request.into_inner().into())
         .await?;
 
     Ok(tonic::Response::new(
@@ -318,7 +321,7 @@ impl<T: DevicePluginService> proto::device_plugin_server::DevicePlugin for T {
     request: tonic::Request<proto::AllocateRequest>,
   ) -> Result<tonic::Response<proto::AllocateResponse>, tonic::Status> {
     let response =
-      <Self as DevicePluginService>::allocate(&self, request.into_inner().into()).await?;
+      <Self as DevicePluginService>::allocate(self, request.into_inner().into()).await?;
 
     Ok(tonic::Response::new(proto::AllocateResponse::from(
       response,
@@ -329,7 +332,7 @@ impl<T: DevicePluginService> proto::device_plugin_server::DevicePlugin for T {
     &self,
     request: tonic::Request<proto::PreStartContainerRequest>,
   ) -> Result<tonic::Response<proto::PreStartContainerResponse>, tonic::Status> {
-    <Self as DevicePluginService>::prestart_container(&self, request.into_inner().into()).await?;
+    <Self as DevicePluginService>::prestart_container(self, request.into_inner().into()).await?;
 
     Ok(tonic::Response::new(proto::PreStartContainerResponse {}))
   }
@@ -346,7 +349,7 @@ where
   pub async fn start(
     self,
     resource_name: impl Into<String>,
-  ) -> Result<Server<UnixSocketListener, impl Any>, ConnectionError> {
+  ) -> Result<KubernetesDevicePluginServer, ConnectionError> {
     let resource_name: String = resource_name.into();
     let span = span!(
       Level::INFO,
@@ -360,9 +363,13 @@ where
   async fn _start(
     self,
     resource_name: String,
-  ) -> Result<Server<UnixSocketListener, impl Any>, ConnectionError> {
+  ) -> Result<KubernetesDevicePluginServer, ConnectionError> {
     let file_name = slug::slugify(&resource_name);
     let plugins_dir: &Path = DEVICE_PLUGIN_PATH.as_ref();
+    if !plugins_dir.is_dir() {
+      return Err(ConnectionError::PluginDirDoesNotExist);
+    }
+
     let socket_path = {
       let mut index = 0usize;
       loop {
@@ -393,13 +400,18 @@ where
     // .http2_keep_alive_timeout(http2_keepalive_timeout)
     // .http2_max_frame_size(max_frame_size);
 
+    let server = KubernetesDevicePluginServer::start(move |signal| {
+      task::spawn(server.with_graceful_shutdown(signal))
+    });
+
     let channel = Endpoint::try_from("http://[::]:50051")
       .unwrap()
       .connect_with_connector(service_fn(|_: Uri| {
         // Connect to a Uds socket
         UnixStream::connect(KUBELET_SOCKET)
       }))
-      .await?;
+      .await
+      .map_err(ConnectionError::KubeletSocketConnect)?;
 
     let mut kubelet_client = proto::registration_client::RegistrationClient::new(channel);
     kubelet_client
@@ -420,6 +432,15 @@ where
 
 #[derive(Debug, Error)]
 pub enum ConnectionError {
+  #[error(
+    "Plugins dir '{}' does not exist or is not a directory",
+    DEVICE_PLUGIN_PATH
+  )]
+  PluginDirDoesNotExist,
+
+  #[error("Failed to connect to kubelet socket at '{}': {0}", KUBELET_SOCKET)]
+  KubeletSocketConnect(tonic::transport::Error),
+
   #[error(transparent)]
   Transport(#[from] tonic::transport::Error),
 

@@ -1,3 +1,4 @@
+mod class_actor;
 mod device_actor;
 
 use crate::{

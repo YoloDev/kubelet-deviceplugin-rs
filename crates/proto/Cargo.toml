@@ -16,6 +16,7 @@ pin-project = "1"
 prost = "0.7"
 prost-types = "0.7"
 slug = "0.1"
+static_assertions = "1"
 thiserror = "1"
 tokio = "1"
 tokio-stream = { version = "0.1", features = ["net"] }

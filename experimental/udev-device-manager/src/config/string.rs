@@ -168,7 +168,7 @@ impl Borrow<str> for InternedString {
 impl AsRef<OsStr> for InternedString {
   #[inline]
   fn as_ref(&self) -> &OsStr {
-    (&**self).as_ref()
+    (&*self).as_ref()
   }
 }
 

@@ -81,16 +81,6 @@ pub enum MatchResult<'a> {
   Mismatch(SmallVec<[Mismatch<'a>; 2]>),
 }
 
-impl<'a> MatchResult<'a> {
-  pub fn is_match(&self) -> bool {
-    matches!(self, MatchResult::Matches)
-  }
-
-  pub fn is_mismatch(&self) -> bool {
-    matches!(self, MatchResult::Mismatch(_))
-  }
-}
-
 impl<'a> ops::AddAssign for MatchResult<'a> {
   fn add_assign(&mut self, rhs: Self) {
     match self {
@@ -104,7 +94,7 @@ impl<'a> ops::AddAssign for MatchResult<'a> {
 }
 
 impl<'a> MatchResult<'a> {
-  pub fn expected_one_of(
+  fn expected_one_of(
     field: InternedString,
     values: &'a SmallVec<[InternedString; 2]>,
     actual: Option<InternedString>,
@@ -116,7 +106,7 @@ impl<'a> MatchResult<'a> {
     }])
   }
 
-  pub fn expected_none_of(
+  fn expected_none_of(
     field: InternedString,
     values: &'a SmallVec<[InternedString; 2]>,
     actual: Option<InternedString>,
@@ -128,7 +118,7 @@ impl<'a> MatchResult<'a> {
     }])
   }
 
-  pub fn expected_any(field: InternedString, actual: Option<InternedString>) -> Self {
+  fn expected_any(field: InternedString, actual: Option<InternedString>) -> Self {
     Self::Mismatch(smallvec![Mismatch {
       field,
       expected_value: ExpectedValue::Any,
@@ -136,7 +126,7 @@ impl<'a> MatchResult<'a> {
     }])
   }
 
-  pub fn expected_none(field: InternedString, actual: Option<InternedString>) -> Self {
+  fn expected_none(field: InternedString, actual: Option<InternedString>) -> Self {
     Self::Mismatch(smallvec![Mismatch {
       field,
       expected_value: ExpectedValue::None,
@@ -144,7 +134,7 @@ impl<'a> MatchResult<'a> {
     }])
   }
 
-  pub fn expected_value(
+  fn expected_value(
     field: InternedString,
     value: InternedString,
     actual: Option<InternedString>,

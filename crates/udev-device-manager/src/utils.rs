@@ -1,128 +1,137 @@
-mod filter_map_bastion_message;
-
-use anyhow::Result;
-use anyhow::{format_err, Error};
-use bastion::{
-  context::BastionContext,
-  distributor::Distributor,
-  message::MessageHandler,
-  prelude::{SendError, SignedMessage},
+use arc_swap::ArcSwap;
+use color_eyre::{
+  eyre::{self, eyre},
+  Report, Section,
 };
-use futures::{future::BoxFuture, Stream};
-use pin_project::pin_project;
 use std::{
+  error::Error,
+  fmt,
   future::Future,
   pin::Pin,
-  task::{Context, Poll},
-  time::Duration,
+  sync::Arc,
+  task::{Context, Poll, Waker},
 };
 
-pub use filter_map_bastion_message::FilterMapBasionMessage;
+pub trait AggregateErrorExt {
+  fn collect_errors(self) -> Result<(), eyre::Error>;
+}
 
-pub(crate) trait BastionStreamExt:
-  Stream<Item = Result<SignedMessage, Error>> + Sized
+enum AggregatorState<E>
+where
+  E: Error + Send + Sync + 'static,
 {
-  fn filter_map_bastion_message<F, T>(self, f: F) -> FilterMapBasionMessage<Self, F, T>
-  where
-    F: (Fn(MessageHandler<Option<T>>) -> MessageHandler<Option<T>>) + Unpin,
-  {
-    FilterMapBasionMessage::new(self, f)
+  Single(E),
+  Compound(Report),
+}
+
+impl<E> AggregatorState<E>
+where
+  E: Error + Send + Sync + 'static,
+{
+  fn add(self, error: E) -> Self {
+    match self {
+      AggregatorState::Single(e) => {
+        AggregatorState::Compound(eyre!("encountered multiple errors").error(e).error(error))
+      }
+      AggregatorState::Compound(r) => AggregatorState::Compound(r.error(error)),
+    }
+  }
+
+  fn into_report(self) -> Report {
+    match self {
+      AggregatorState::Single(e) => e.into(),
+      AggregatorState::Compound(r) => r,
+    }
   }
 }
 
-impl<'a> BastionStreamExt for BastionContextStream<'a> {}
+impl<I, E> AggregateErrorExt for I
+where
+  I: IntoIterator<Item = Result<(), E>>,
+  E: Error + Send + Sync + 'static,
+{
+  fn collect_errors(self) -> Result<(), eyre::Error> {
+    let mut iter = self.into_iter().filter_map(Result::err);
+    match iter.next() {
+      None => Ok(()),
+      Some(e) => {
+        let report = iter
+          .fold(AggregatorState::Single(e), |s, e| s.add(e))
+          .into_report();
 
-pub(crate) trait BastionContextExt {
-  type Stream: Stream<Item = Result<SignedMessage, Error>>;
-
-  fn stream(self) -> Self::Stream;
-}
-
-impl<'a> BastionContextExt for &'a BastionContext {
-  type Stream = BastionContextStream<'a>;
-
-  fn stream(self) -> Self::Stream {
-    BastionContextStream::new(self)
-  }
-}
-
-pub(crate) struct BastionContextStream<'a> {
-  ctx: &'a BastionContext,
-
-  fut: BoxFuture<'a, Result<SignedMessage, ()>>,
-}
-
-impl<'a> BastionContextStream<'a> {
-  fn new(ctx: &'a BastionContext) -> Self {
-    let fut = Box::pin(ctx.recv());
-    Self { ctx, fut }
-  }
-}
-
-impl<'a> Stream for BastionContextStream<'a> {
-  type Item = Result<SignedMessage, Error>;
-
-  fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-    match Pin::new(&mut self.fut).poll(cx) {
-      Poll::Pending => Poll::Pending,
-      Poll::Ready(msg) => {
-        let fut = Box::pin(self.ctx.recv());
-        self.fut = fut;
-        Poll::Ready(Some(
-          msg.map_err(|()| format_err!("Failed to get bastion message")),
-        ))
+        Err(report)
       }
     }
   }
 }
 
-pub(crate) trait DistributorExt<'a> {
-  fn wait_for_responsive(self) -> WaitForResponsive<'a>;
+struct NotifySingleState {
+  waker: Option<Waker>,
+  ready: bool,
 }
 
-impl<'a> DistributorExt<'a> for &'a Distributor {
-  fn wait_for_responsive(self) -> WaitForResponsive<'a> {
-    WaitForResponsive {
-      distributor: self,
-      delay: None,
+impl Default for NotifySingleState {
+  fn default() -> Self {
+    Self {
+      waker: None,
+      ready: false,
     }
   }
 }
 
-#[pin_project]
-#[derive(Debug)]
-pub(crate) struct WaitForResponsive<'a> {
-  distributor: &'a Distributor,
-
-  #[pin]
-  delay: Option<tokio::time::Sleep>,
+#[derive(Clone, Default)]
+pub struct NotifySingle {
+  inner: Arc<ArcSwap<NotifySingleState>>,
 }
 
-impl<'a> Future for WaitForResponsive<'a> {
-  type Output = Result<()>;
+impl fmt::Debug for NotifySingle {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct(stringify!(NotifySingle))
+      .field("ready", &self.inner.load().ready)
+      .finish_non_exhaustive()
+  }
+}
+
+impl NotifySingle {
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  pub fn notify(&self) {
+    let state = self.inner.swap(Arc::new(NotifySingleState {
+      waker: None,
+      ready: true,
+    }));
+
+    let state = match Arc::try_unwrap(state) {
+      Ok(v) => v,
+      Err(_) => unreachable!(),
+    };
+
+    match state.waker {
+      None => (),
+      Some(waker) => waker.wake(),
+    }
+  }
+}
+
+impl Future for NotifySingle {
+  type Output = ();
 
   fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-    let this = self.project();
-    let mut delay: Pin<&mut Option<tokio::time::Sleep>> = this.delay;
-    let distributor: &'a Distributor = this.distributor;
+    let state = self.inner.swap(Arc::new(NotifySingleState {
+      waker: Some(cx.waker().clone()),
+      ready: false,
+    }));
 
-    loop {
-      match delay.as_mut().as_pin_mut() {
-        None => match distributor.tell_one(()) {
-          Ok(()) => break Poll::Ready(Ok(())),
-          Err(SendError::EmptyRecipient) => {
-            let sleep = tokio::time::sleep(Duration::from_millis(50));
-            delay.set(Some(sleep));
-          }
-          Err(e) => break Poll::Ready(Err(e.into())),
-        },
-        Some(sleep) => match sleep.poll(cx) {
-          Poll::Pending => break Poll::Pending,
-          Poll::Ready(_) => {
-            delay.set(None);
-          }
-        },
-      }
+    let state = match Arc::try_unwrap(state) {
+      Ok(v) => v,
+      Err(_) => unreachable!(),
+    };
+
+    match state.ready {
+      true => Poll::Ready(()),
+      false => Poll::Pending,
     }
   }
 }
