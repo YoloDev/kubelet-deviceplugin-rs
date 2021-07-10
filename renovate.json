@@ -1,5 +1,10 @@
 {
-  "extends": [
-    "config:base"
+  "extends": ["config:base"],
+  "packageRules": [
+    {
+      "datasources": ["crate"],
+      "packagePatterns": ["^tonic.*", "^prost.*"],
+      "groupName": "tonic & prost packages"
+    }
   ]
 }
