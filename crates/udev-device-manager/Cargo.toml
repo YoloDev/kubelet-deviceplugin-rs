@@ -14,7 +14,7 @@ clap = "3.0.0-beta.2"
 color-eyre = "0.5"
 futures = "0.3"
 im = "15"
-lasso = { version = "0.5", features = ["multi-threaded"] }
+lasso = { version = "0.6", features = ["multi-threaded"] }
 notify = "4"
 once_cell = "1"
 pin-project = "1"
