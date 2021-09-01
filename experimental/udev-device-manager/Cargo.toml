@@ -11,7 +11,7 @@ async-trait = "0.1"
 bastion = { git = "https://github.com/bastion-rs/bastion.git", rev = "44508cd4e7e323e90bf3548d979c6e0974cb1cc2", features = ["tokio-runtime"] }
 clap = "3.0.0-beta.2"
 futures = "0.3"
-lasso = "0.5"
+lasso = "0.6"
 notify = "4"
 once_cell = "1"
 pin-project = "1"
