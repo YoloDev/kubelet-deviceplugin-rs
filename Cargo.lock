@@ -1517,9 +1517,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-udev"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44b6256bb5be66b53b9ab51d05074d9cf3d50a05d099fa5eb6b42020cd907010"
+checksum = "246ffebae60acd93eb0056bac967cad807c7aa09916fabceac50479ad1f53e64"
 dependencies = [
  "futures-core",
  "mio 0.7.13",
